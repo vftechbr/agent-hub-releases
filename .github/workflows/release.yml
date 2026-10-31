@@ -199,8 +199,9 @@ jobs:
       - name: Empacotar
         working-directory: desktop
         env:
-          # Nunca procurar certificado por conta própria no runner.
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # Sem certificado nosso, nunca procurar um por conta própria no runner. Com ele (macOS), precisa ficar ligado: o
+          # electron-builder só assina com a descoberta ativa, e ela olha só o keychain temporário do CSC_LINK.
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ (runner.os == 'macOS' && secrets.MAC_CSC_LINK != '') && 'true' || 'false' }}
           # Segredos do macOS só no job do macOS (no Windows o CSC_LINK viraria o certificado do instalador).
           CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || '' }}
           CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
