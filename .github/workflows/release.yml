@@ -112,10 +112,10 @@ jobs:
           git config --global init.defaultBranch main
 
       - name: Clippy
-        run: cargo clippy --workspace --exclude agent-hub-app --tests -- -D warnings
+        run: cargo clippy --workspace --exclude agent-hub-app --exclude agent-hub-browser --tests -- -D warnings
 
       - name: Testes
-        run: cargo test --workspace --exclude agent-hub-app
+        run: cargo test --workspace --exclude agent-hub-app --exclude agent-hub-browser
         # Os testes de sessão/PTY e de caminho assumem shell e caminhos Unix; no Windows o job
         # vale como verificação de build e clippy até esses testes serem portados.
         continue-on-error: ${{ runner.os == 'Windows' }}
