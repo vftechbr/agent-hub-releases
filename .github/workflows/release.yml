@@ -11,9 +11,14 @@ name: Release
 # AGENT_HUB_DEPLOY_KEY deste repositório. A publicação usa o GITHUB_TOKEN daqui; nenhum outro token é preciso.
 # Os logs e artefatos deste repositório são públicos: nada do workflow pode imprimir código-fonte nem segredos.
 #
-# Sem certificados, os pacotes saem sem assinatura (macOS: ad-hoc). Para assinar, configure os segredos que o
-# electron-builder lê (CSC_LINK/CSC_KEY_PASSWORD, APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID, WIN_CSC_LINK)
-# e repasse-os no passo "Empacotar".
+# Assinatura e notarização do macOS (opcionais; sem elas o app sai assinado ad-hoc e o Gatekeeper bloqueia). Segredos
+# deste repositório, só lidos no job do macOS:
+#   MAC_CSC_LINK          certificado "Developer ID Application" exportado em .p12, em base64 (`base64 -i cert.p12`)
+#   MAC_CSC_KEY_PASSWORD  a senha do .p12
+#   APPLE_API_KEY_P8      conteúdo do .p8 da chave de API do App Store Connect (Users and Access → Integrations)
+#   APPLE_API_KEY_ID      Key ID dessa chave
+#   APPLE_API_ISSUER      Issuer ID da equipe
+# Só o certificado: assina sem notarizar. Certificado + chave: assina, notariza e grampeia o ticket.
 on:
   workflow_dispatch:
     inputs:
@@ -178,11 +183,29 @@ jobs:
         working-directory: desktop
         run: pnpm install --frozen-lockfile
 
+      # A chave de API do notarytool precisa estar num arquivo; fica fora do repositório e some com o runner.
+      - name: Chave de notarização (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          if [ -n "${APPLE_API_KEY_P8}" ]; then
+            key="${RUNNER_TEMP}/notary.p8"
+            printf '%s' "${APPLE_API_KEY_P8}" > "${key}"
+            echo "APPLE_API_KEY=${key}" >> "$GITHUB_ENV"
+          fi
+
       - name: Empacotar
         working-directory: desktop
         env:
           # Nunca procurar certificado por conta própria no runner.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # Segredos do macOS só no job do macOS (no Windows o CSC_LINK viraria o certificado do instalador).
+          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          APPLE_API_KEY_ID: ${{ runner.os == 'macOS' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ runner.os == 'macOS' && secrets.APPLE_API_ISSUER || '' }}
         run: node package.mjs --arch ${{ matrix.archs }}
 
       - name: Instaladores
