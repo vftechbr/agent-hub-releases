@@ -1,0 +1,258 @@
+name: Release
+
+# Monta e publica uma versão do AgentHub. O código fica no repositório PRIVADO vftechbr/agent-hub; este repositório é
+# público só para o Actions sair de graça (sem limite de minutos, macOS incluído) e para o app instalado se atualizar
+# daqui sem token (desktop/src/main/updates.ts lê as Releases deste repositório).
+#
+# Como lançar: suba a versão em desktop/package.json no agent-hub, faça push na main e rode este workflow
+# (Actions → Release → Run workflow). A Release sai como v<versão do package.json>; se já existir, o job para.
+#
+# Acesso ao código: deploy key SÓ DE LEITURA no agent-hub (Settings → Deploy keys), com a chave privada no segredo
+# AGENT_HUB_DEPLOY_KEY deste repositório. A publicação usa o GITHUB_TOKEN daqui; nenhum outro token é preciso.
+# Os logs e artefatos deste repositório são públicos: nada do workflow pode imprimir código-fonte nem segredos.
+#
+# Sem certificados, os pacotes saem sem assinatura (macOS: ad-hoc). Para assinar, configure os segredos que o
+# electron-builder lê (CSC_LINK/CSC_KEY_PASSWORD, APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID, WIN_CSC_LINK)
+# e repasse-os no passo "Empacotar".
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag ou commit do agent-hub a lançar'
+        default: main
+        required: true
+      publish:
+        description: 'Publicar a Release (desmarcado: só monta e testa, instaladores ficam nos artefatos)'
+        type: boolean
+        default: true
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  SOURCE_REPO: vftechbr/agent-hub
+
+jobs:
+  source:
+    name: Versão
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.v.outputs.sha }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ inputs.ref }}
+          ssh-key: ${{ secrets.AGENT_HUB_DEPLOY_KEY }}
+
+      - name: Commit e versão
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$(node -p "require('./desktop/package.json').version")"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Commit $(git rev-parse --short HEAD) → ${tag}"
+          if [ "${{ inputs.publish }}" = "true" ] && gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "::error::A Release ${tag} já existe. Suba a versão em desktop/package.json do agent-hub e rode de novo."
+            exit 1
+          fi
+
+  check:
+    name: Testes (${{ matrix.os }})
+    needs: source
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      RUST_BACKTRACE: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ needs.source.outputs.sha }}
+          ssh-key: ${{ secrets.AGENT_HUB_DEPLOY_KEY }}
+
+      - name: Dependências do gpui (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config cmake clang \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libvulkan-dev libx11-dev libx11-xcb-dev libxcb1-dev \
+            libxcb-xkb-dev libxcb-randr0-dev libxcb-xfixes0-dev libxcb-shape0-dev libxcb-render0-dev \
+            libxi-dev libxrandr-dev libxcursor-dev \
+            libfontconfig-dev libfreetype-dev libssl-dev libzstd-dev libasound2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: check
+
+      - name: Identidade do git para os testes
+        run: |
+          git config --global user.name ci
+          git config --global user.email ci@example.invalid
+          git config --global init.defaultBranch main
+
+      - name: Clippy
+        run: cargo clippy --workspace --tests -- -D warnings
+
+      - name: Testes
+        run: cargo test --workspace
+        # Os testes de sessão/PTY e de caminho assumem shell e caminhos Unix; no Windows o job
+        # vale como verificação de build e clippy até esses testes serem portados.
+        continue-on-error: ${{ runner.os == 'Windows' }}
+
+  package:
+    name: ${{ matrix.name }}
+    needs: [source, check]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Um job no Apple Silicon gera arm64 e x64 (daemon x64 compilado em cruzado).
+          - name: macOS (arm64 + x64)
+            os: macos-latest
+            archs: arm64,x64
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - name: Linux (x64)
+            os: ubuntu-latest
+            archs: x64
+            rust_targets: x86_64-unknown-linux-gnu
+          - name: Windows (x64)
+            os: windows-latest
+            archs: x64
+            rust_targets: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ needs.source.outputs.sha }}
+          ssh-key: ${{ secrets.AGENT_HUB_DEPLOY_KEY }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.rust_targets }}
+
+      - name: Daemon (release)
+        shell: bash
+        run: |
+          IFS=',' read -ra TARGETS <<< "${{ matrix.rust_targets }}"
+          for t in "${TARGETS[@]}"; do
+            cargo build --release -p agent-hub-daemon --target "$t"
+          done
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+
+      - name: Dependências do app
+        working-directory: desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Empacotar
+        working-directory: desktop
+        env:
+          # Nunca procurar certificado por conta própria no runner.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: node package.mjs --arch ${{ matrix.archs }}
+
+      - name: Instaladores
+        uses: actions/upload-artifact@v4
+        with:
+          name: agenthub-${{ runner.os }}
+          if-no-files-found: error
+          # latest*.yml e .blockmap: o que o electron-updater lê (versão, sha512, download diferencial); .zip: o
+          # Squirrel.Mac instala por ele (só com assinatura de verdade).
+          path: |
+            desktop/release/stable/*.dmg
+            desktop/release/stable/*.zip
+            desktop/release/stable/*.AppImage
+            desktop/release/stable/*.deb
+            desktop/release/stable/*.exe
+            desktop/release/stable/*.blockmap
+            desktop/release/stable/latest*.yml
+
+  release:
+    name: Publicar Release
+    if: inputs.publish
+    needs: [source, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ needs.source.outputs.sha }}
+          ssh-key: ${{ secrets.AGENT_HUB_DEPLOY_KEY }}
+          fetch-depth: 0
+          path: src
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # Notas: os assuntos dos commits desde a Release anterior. O commit de origem de cada Release fica num comentário
+      # HTML no fim das notas, que é de onde a próxima tira o ponto de partida.
+      - name: Notas da versão
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.source.outputs.tag }}
+          SHA: ${{ needs.source.outputs.sha }}
+        run: |
+          prev=$(gh release view --repo "${GITHUB_REPOSITORY}" --json body -q .body 2>/dev/null \
+            | sed -n 's/.*<!-- source: \([0-9a-f]\{40\}\) -->.*/\1/p' | head -1)
+          if [ -n "${prev}" ] && git -C src cat-file -e "${prev}^{commit}" 2>/dev/null; then
+            range="${prev}..${SHA}"
+          else
+            range="${SHA}"
+          fi
+          {
+            echo "## AgentHub ${TAG}"
+            echo
+            git -C src log --no-merges --pretty='- %s' "${range}" | head -100
+            echo
+            echo "Baixe o instalador do seu sistema abaixo. Quem já tem o AgentHub instalado recebe o aviso dentro do app."
+            echo
+            echo "<!-- source: ${SHA} -->"
+          } > notes.md
+          cat notes.md
+
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.source.outputs.tag }}
+        run: |
+          ls -la dist
+          gh release create "${TAG}" dist/* --repo "${GITHUB_REPOSITORY}" --target main \
+            --title "AgentHub ${TAG}" --notes-file notes.md
