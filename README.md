@@ -105,21 +105,30 @@ mande para um agente com um clique.
 
 ## Rotinas: agentes que trabalham sozinhos
 
-Agende um agente por horário, por verificação, por comando, por **webhook** ou por evento do **GitHub**. Ele recebe a
-instrução, faz o trabalho e deixa o resultado num chat.
+Monte fluxos com blocos, sem escrever código. Uma rotina começa por um gatilho (**horário**, **verificação por
+agente**, **comando** ou **PR no GitHub ou no Bitbucket**) e segue passo a passo:
+
+- **Agente:** pede algo a um agente do projeto e guarda a resposta.
+- **Comando:** roda um comando na pasta do projeto.
+- **Se / senão:** segue por um caminho ou outro conforme o que os passos anteriores devolveram.
+- **Avisar você**, **criar tarefa** ou **comentar no PR**.
 
 <p align="center">
-  <img src="docs/prints/rotina.png" alt="Editor de rotina com gatilho por comando" width="900">
+  <img src="docs/prints/rotina.png" alt="Fluxo de rotina: agente revisor, comando de testes e um se/senão que avisa você ou chama o agente dev para corrigir" width="900">
 </p>
 
-**Exemplos de rotinas:**
+No exemplo acima, toda segunda às 9h o `@revisor` revisa o que mudou e dá um veredito, e os testes rodam. Se os dois
+passarem, você recebe um aviso. Senão, o `@dev` recebe a resposta do revisor e corrige. Cada execução fica registrada
+com os passos que rodou e o caminho que seguiu.
 
-| Quando                         | Agente     | Instrução                                                    |
-|--------------------------------|------------|--------------------------------------------------------------|
-| Todo dia às 9h                 | `@gestao`  | Resuma o que mudou no repositório desde ontem.               |
-| Abriram um PR no GitHub        | `@revisor` | Revise o diff e comente os problemas encontrados.            |
-| `npm test` passou a falhar     | `@dev`     | Descubra por que o teste quebrou e proponha a correção.      |
-| Chegou um webhook do monitor   | `@ops`     | Leia o alerta, investigue os logs e diga se é preciso agir.  |
+**Mais exemplos:**
+
+| Quando                          | Fluxo                                                                          |
+|---------------------------------|--------------------------------------------------------------------------------|
+| Todo dia às 9h                  | `@gestao` resume o que mudou no repositório → avisar você                      |
+| Abriram um PR no GitHub         | `@revisor` revisa o diff → comentar no PR                                      |
+| `npm test` passou a falhar      | `@dev` descobre por que quebrou → criar tarefa com a correção proposta         |
+| O agente notou erro novo no log | `@ops` investiga → se for grave, avisar você                                   |
 
 ---
 
