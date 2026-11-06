@@ -54,17 +54,11 @@ subir **sob demanda**, quando alguém o chama, e fechar sozinho depois.
 
 ---
 
-## Converse no chat — ou no terminal
+## Converse no chat
 
 O chat mostra markdown, código, os passos do agente e pede sua aprovação antes de rodar comandos sensíveis:
 **Permitir**, **Sempre permitir neste chat** ou **Negar e explicar**. Troque modelo, esforço e permissões direto no
 campo de mensagem e veja quanto da janela de contexto já foi usada.
-
-Prefere a interface original da CLI? Um clique alterna para o **modo Terminal** na mesma conversa.
-
-<p align="center">
-  <img src="docs/prints/modo-terminal.png" alt="A mesma conversa aberta no modo Terminal do Claude Code" width="900">
-</p>
 
 Subagentes que a CLI dispara aparecem num painel próprio, com o pedido, as ferramentas usadas e o resultado.
 
@@ -156,7 +150,8 @@ Já tem MCPs configurados nas CLIs? Importe com um clique.
 
 - **Browser por projeto**, que os agentes também usam para testar páginas, com o seu login quando você permitir.
 - **Artifacts do Claude** abertos num painel do próprio app.
-- **Terminais avulsos** em lista ou em grade, ao lado dos agentes.
+- **Terminal rápido** (⌘⇧J no macOS, Ctrl+Shift+J no Windows e no Linux): um shell na pasta do projeto que desce
+  por cima da janela e some com o mesmo atalho. Caminhos de arquivo na saída viram links que abrem o arquivo no app.
 - **Memória do time**: decisões e armadilhas ficam guardadas e os agentes consultam antes de trabalhar.
 - **Busca no código** local para os agentes acharem o trecho certo gastando menos tokens.
 - **Atualizações automáticas**: o app procura versões novas aqui e avisa quando há uma.
