@@ -180,8 +180,8 @@ jobs:
         run: |
           docker run --rm -v "$PWD":/src -w /src -e CARGO_TERM_COLOR=always -e CARGO_INCREMENTAL=0 \
             quay.io/pypa/manylinux_2_28_x86_64 bash -euo pipefail -c '
-              # IPC::Cmd: o Configure do OpenSSL embutido; openssl-devel: builds sem o `vendored`.
-              dnf install -y -q perl-IPC-Cmd openssl-devel >/dev/null
+              # IPC::Cmd e Time::Piece: o Configure do OpenSSL embutido; openssl-devel: builds sem o `vendored`.
+              dnf install -y -q perl-IPC-Cmd perl-Time-Piece openssl-devel >/dev/null
               curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable >/dev/null
               . "$HOME/.cargo/env"
               cargo build --release -p agent-hub-daemon --target x86_64-unknown-linux-gnu
