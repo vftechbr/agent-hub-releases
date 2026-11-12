@@ -162,12 +162,43 @@ jobs:
           key: release-${{ matrix.rust_targets }}
 
       - name: Daemon (release)
+        if: runner.os != 'Linux'
         shell: bash
         run: |
           IFS=',' read -ra TARGETS <<< "${{ matrix.rust_targets }}"
           for t in "${TARGETS[@]}"; do
             cargo build --release -p agent-hub-daemon --target "$t"
           done
+
+      # Linux: o runner é Ubuntu 24.04 (glibc 2.39); compilado nele, o daemon não abre em distros mais velhas
+      # (Ubuntu 20.04/22.04, Debian 11). Compila dentro do manylinux_2_28 (glibc 2.28, gcc novo com a libstdc++ nova
+      # ligada à parte), o mesmo truque dos wheels do Python: roda em qualquer distro com glibc >= 2.28. O OpenSSL vai
+      # junto no binário (feature `vendored` no agent-hub).
+      - name: Daemon (release, Linux compatível)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          docker run --rm -v "$PWD":/src -w /src -e CARGO_TERM_COLOR=always -e CARGO_INCREMENTAL=0 \
+            quay.io/pypa/manylinux_2_28_x86_64 bash -euo pipefail -c '
+              # IPC::Cmd e FindBin: o Configure do OpenSSL embutido; openssl-devel: builds sem o `vendored`.
+              dnf install -y -q perl-IPC-Cmd perl-FindBin openssl-devel >/dev/null
+              curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable >/dev/null
+              . "$HOME/.cargo/env"
+              cargo build --release -p agent-hub-daemon --target x86_64-unknown-linux-gnu
+              chown -R '"$(id -u):$(id -g)"' target'
+
+      # Trava: o daemon do pacote Linux precisa abrir num Ubuntu 20.04 (glibc 2.31, libstdc++ do gcc 9, sem libssl 3).
+      - name: Daemon abre no Ubuntu 20.04
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          bin=target/x86_64-unknown-linux-gnu/release/agent-hub-daemon
+          out="$(docker run --rm -v "$PWD/$(dirname "$bin")":/b ubuntu:20.04 sh -c 'ldd /b/agent-hub-daemon; /b/agent-hub-daemon --connect-info 2>&1 || true')"
+          echo "$out"
+          if echo "$out" | grep -E "not found|version .GLIBC|version .GLIBCXX|cannot open shared object"; then
+            echo "::error::o daemon Linux não abre no Ubuntu 20.04"
+            exit 1
+          fi
 
       - uses: pnpm/action-setup@v4
         with:
