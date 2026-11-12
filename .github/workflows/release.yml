@@ -187,13 +187,31 @@ jobs:
               cargo build --release -p agent-hub-daemon --target x86_64-unknown-linux-gnu
               chown -R '"$(id -u):$(id -g)"' target'
 
-      # Trava: o daemon do pacote Linux precisa abrir num Ubuntu 20.04 (glibc 2.31, libstdc++ do gcc 9, sem libssl 3).
+      # Busca por significado no Linux: o daemon carrega o ONNX Runtime ao lado dele. O binário pronto do crate `ort`
+      # exige glibc 2.38; o oficial da Microsoft (glibc 2.27) vai no pacote. Versão casada com a API 24 do `ort`.
+      - name: ONNX Runtime oficial (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          ORT_VERSION: 1.24.4
+          ORT_SHA256: 3a211fbea252c1e66290658f1b735b772056149f28321e71c308942cdb54b747
+        run: |
+          tgz="onnxruntime-linux-x64-${ORT_VERSION}.tgz"
+          curl -fsSL -o "${RUNNER_TEMP}/${tgz}" "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/${tgz}"
+          echo "${ORT_SHA256}  ${RUNNER_TEMP}/${tgz}" | sha256sum -c -
+          tar xzf "${RUNNER_TEMP}/${tgz}" -C "${RUNNER_TEMP}"
+          cp "${RUNNER_TEMP}/onnxruntime-linux-x64-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION}" \
+            target/x86_64-unknown-linux-gnu/release/libonnxruntime.so
+
+      # Trava: o daemon do pacote Linux (e o runtime do ONNX) precisam abrir num Ubuntu 20.04 (glibc 2.31, libstdc++ do
+      # gcc 9, sem libssl 3).
       - name: Daemon abre no Ubuntu 20.04
         if: runner.os == 'Linux'
         shell: bash
         run: |
           bin=target/x86_64-unknown-linux-gnu/release/agent-hub-daemon
-          out="$(docker run --rm -v "$PWD/$(dirname "$bin")":/b ubuntu:20.04 sh -c 'ldd /b/agent-hub-daemon; /b/agent-hub-daemon --connect-info 2>&1 || true')"
+          test -f "$(dirname "$bin")/libonnxruntime.so"
+          out="$(docker run --rm -v "$PWD/$(dirname "$bin")":/b ubuntu:20.04 sh -c 'ldd /b/agent-hub-daemon; ldd /b/libonnxruntime.so; /b/agent-hub-daemon --connect-info 2>&1 || true')"
           echo "$out"
           if echo "$out" | grep -E "not found|version .GLIBC|version .GLIBCXX|cannot open shared object"; then
             echo "::error::o daemon Linux não abre no Ubuntu 20.04"
