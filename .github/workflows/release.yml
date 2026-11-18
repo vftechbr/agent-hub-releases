@@ -189,19 +189,24 @@ jobs:
 
       # Busca por significado no Linux: o daemon carrega o ONNX Runtime ao lado dele. O binário pronto do crate `ort`
       # exige glibc 2.38; o oficial da Microsoft (glibc 2.27) vai no pacote. Versão casada com a API 24 do `ort`.
+      # Vem do pacote NuGet oficial (Microsoft.ML.OnnxRuntime, nuget.org): o github.com/microsoft/onnxruntime saiu do ar
+      # em 2026-11-17 e as Releases de lá dão 404. Pacote e biblioteca conferidos pelo SHA-256.
       - name: ONNX Runtime oficial (Linux)
         if: runner.os == 'Linux'
         shell: bash
         env:
           ORT_VERSION: 1.24.4
-          ORT_SHA256: 3a211fbea252c1e66290658f1b735b772056149f28321e71c308942cdb54b747
+          ORT_NUPKG_SHA256: 4b978d5065b85e7004b6c6f60ca494bd978fbe6836cbf0a0b52d82b61ab99638
+          ORT_SO_SHA256: d132535d051344ff5c64c9c200004150559049a81ed330eb4422c1962fb6b7e4
         run: |
-          tgz="onnxruntime-linux-x64-${ORT_VERSION}.tgz"
-          curl -fsSL -o "${RUNNER_TEMP}/${tgz}" "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/${tgz}"
-          echo "${ORT_SHA256}  ${RUNNER_TEMP}/${tgz}" | sha256sum -c -
-          tar xzf "${RUNNER_TEMP}/${tgz}" -C "${RUNNER_TEMP}"
-          cp "${RUNNER_TEMP}/onnxruntime-linux-x64-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION}" \
-            target/x86_64-unknown-linux-gnu/release/libonnxruntime.so
+          pkg="${RUNNER_TEMP}/microsoft.ml.onnxruntime.${ORT_VERSION}.nupkg"
+          curl -fsSL --retry 3 -o "${pkg}" \
+            "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/${ORT_VERSION}/microsoft.ml.onnxruntime.${ORT_VERSION}.nupkg"
+          echo "${ORT_NUPKG_SHA256}  ${pkg}" | sha256sum -c -
+          unzip -q -o "${pkg}" runtimes/linux-x64/native/libonnxruntime.so -d "${RUNNER_TEMP}/ort"
+          so="${RUNNER_TEMP}/ort/runtimes/linux-x64/native/libonnxruntime.so"
+          echo "${ORT_SO_SHA256}  ${so}" | sha256sum -c -
+          cp "${so}" target/x86_64-unknown-linux-gnu/release/libonnxruntime.so
 
       # Trava: o daemon do pacote Linux (e o runtime do ONNX) precisam abrir num Ubuntu 20.04 (glibc 2.31, libstdc++ do
       # gcc 9, sem libssl 3).
